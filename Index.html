@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text Relay</title>
+<style>
+:root {
+  --bg: #eef1f2; --surface: #fff; --surface-2: #e3e8ea; --fg: #14201f; --muted: #5a6b69;
+  --line: #cdd6d8; --accent: #0b6e66; --accent-fg: #fff; --danger: #b3261e; --ok: #1d7a3a;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0e1615; --surface: #162120; --surface-2: #1f2d2c; --fg: #e4eeec; --muted: #8fa5a2;
+    --line: #2a3b39; --accent: #3fc4b6; --accent-fg: #06201d; --danger: #ff8a80; --ok: #6fd18c; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 20px 16px 40px; }
+main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-size: 26px; margin: 0; }
+h2 { font-size: 13px; margin: 0; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+p { margin: 0; }
+.sub, .hint { color: var(--muted); }
+.hint { font-size: 13px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+textarea { width: 100%; min-height: 110px; resize: vertical; font: 13px/1.5 var(--mono); background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+textarea.big { min-height: 220px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+button { font: inherit; font-weight: 600; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 10px 16px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.meta { font: 12px var(--mono); color: var(--muted); }
+.msg { font-size: 14px; min-height: 1.4em; }
+.msg.err { color: var(--danger); } .msg.ok { color: var(--ok); }
+.bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+.status { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.dot.on { background: var(--ok); }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; background: var(--surface-2); border-radius: 10px; padding: 4px; gap: 4px; }
+.tabs button { border: 0; background: transparent; color: var(--muted); }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--fg); }
+ol { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Text Relay</h1>
+    <p class="sub">Send text of any size from one device to another. No account and no server: the two devices connect directly.</p>
+  </header>
+
+  <section class="panel" id="connect">
+    <div class="row" style="justify-content:space-between">
+      <span class="status"><span class="dot" id="dot"></span><span id="state">Not connected</span></span>
+      <button id="reset" type="button" hidden>Disconnect</button>
+    </div>
+    <div class="tabs" role="tablist" id="tabs">
+      <button role="tab" id="t-a" aria-selected="true" type="button">Device A: start</button>
+      <button role="tab" id="t-b" aria-selected="false" type="button">Device B: join</button>
+    </div>
+
+    <div id="pane-a" style="display:flex;flex-direction:column;gap:10px">
+      <ol>
+        <li>Press <b>Create code</b> and copy the code.</li>
+        <li>On device B, paste it under <b>Join</b> and copy the reply code.</li>
+        <li>Paste the reply below and press <b>Connect</b>.</li>
+      </ol>
+      <div class="row"><button class="primary" id="mk" type="button">Create code</button></div>
+      <h2>Your code</h2>
+      <textarea id="offer" readonly placeholder="Appears here"></textarea>
+      <div class="row"><button id="cp-offer" type="button">Copy code</button></div>
+      <h2>Reply from device B</h2>
+      <textarea id="reply" placeholder="Paste the reply code here"></textarea>
+      <div class="row"><button class="primary" id="fin" type="button">Connect</button></div>
+    </div>
+
+    <div id="pane-b" style="display:none;flex-direction:column;gap:10px">
+      <h2>Code from device A</h2>
+      <textarea id="join-in" placeholder="Paste the code from device A"></textarea>
+      <div class="row"><button class="primary" id="join" type="button">Create reply</button></div>
+      <h2>Your reply</h2>
+      <textarea id="answer" readonly placeholder="Appears here. Copy it to device A."></textarea>
+      <div class="row"><button id="cp-answer" type="button">Copy reply</button></div>
+    </div>
+    <div class="msg" id="cmsg" role="status"></div>
+  </section>
+
+  <section class="panel" id="xfer" hidden>
+    <h2>Send text</h2>
+    <textarea class="big" id="src" placeholder="Paste text here, or load a file." spellcheck="false"></textarea>
+    <div class="row">
+      <button id="load" type="button">Load .txt file</button>
+      <input type="file" id="file" accept=".txt,.md,.csv,.json,.log,text/*" hidden>
+      <span class="meta" id="count">0 characters</span>
+    </div>
+    <div class="row"><button class="primary" id="send" type="button">Send</button></div>
+    <div class="bar" id="sbar" hidden><i></i></div>
+    <div class="msg" id="smsg" role="status"></div>
+
+    <h2>Received text</h2>
+    <textarea class="big" id="out" readonly placeholder="Text from the other device appears here."></textarea>
+    <div class="bar" id="rbar" hidden><i></i></div>
+    <div class="row">
+      <button id="copy" type="button">Copy all</button>
+      <button id="save" type="button">Save as .txt</button>
+      <span class="meta" id="rcount"></span>
+    </div>
+    <div class="msg" id="rmsg" role="status"></div>
+  </section>
+
+  <p class="hint">Both devices need this page open. Same Wi-Fi always works; across different networks it works on most connections. Text goes straight between the devices and is never stored anywhere.</p>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var pc = null, dc = null, incoming = null;
+  var CHUNK = 16000;
+  var ICE = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+  function fmt(n) { return n.toLocaleString("en-US"); }
+  function msg(id, t, k) { var e = $(id); e.textContent = t || ""; e.className = "msg" + (k ? " " + k : ""); }
+
+  // ---- code encoding (compact, copy-paste friendly) ----
+  function b64(bytes) { var s = ""; for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s); }
+  function unb64(str) { var s = atob(str), a = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; }
+  async function pipe(bytes, stream) {
+    var w = stream.writable.getWriter(); w.write(bytes); w.close();
+    return new Uint8Array(await new Response(stream.readable).arrayBuffer());
+  }
+  async function encode(desc) {
+    var raw = new TextEncoder().encode(JSON.stringify(desc));
+    if (typeof CompressionStream === "function") return "Z" + b64(await pipe(raw, new CompressionStream("deflate-raw")));
+    return "P" + b64(raw);
+  }
+  async function decode(code) {
+    code = code.replace(/\s+/g, "");
+    var kind = code[0], bytes = unb64(code.slice(1));
+    if (kind === "Z") {
+      if (typeof DecompressionStream !== "function") throw new Error("This browser cannot read compressed codes.");
+      bytes = await pipe(bytes, new DecompressionStream("deflate-raw"));
+    }
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+
+  // ---- connection ----
+  function newPC() {
+    if (pc) try { pc.close(); } catch (e) {}
+    pc = new RTCPeerConnection(ICE);
+    pc.onconnectionstatechange = function () {
+      var s = pc.connectionState;
+      if (s === "failed" || s === "disconnected" || s === "closed") setConnected(false, s === "failed" ? "Connection failed. Try again, or use the same Wi-Fi." : "Disconnected");
+    };
+    return pc;
+  }
+  function waitIce() {
+    return new Promise(function (res) {
+      if (pc.iceGatheringState === "complete") return res();
+      var t = setTimeout(done, 5000);
+      function done() { clearTimeout(t); pc.removeEventListener("icegatheringstatechange", chk); res(); }
+      function chk() { if (pc.iceGatheringState === "complete") done(); }
+      pc.addEventListener("icegatheringstatechange", chk);
+    });
+  }
+  function setConnected(on, text) {
+    $("dot").className = "dot" + (on ? " on" : "");
+    $("state").textContent = on ? "Connected" : (text || "Not connected");
+    $("xfer").hidden = !on;
+    $("reset").hidden = !on;
+    $("tabs").hidden = on; $("pane-a").style.display = on ? "none" : ($("t-a").getAttribute("aria-selected") === "true" ? "flex" : "none");
+    $("pane-b").style.display = on ? "none" : ($("t-b").getAttribute("aria-selected") === "true" ? "flex" : "none");
+    if (on) msg("cmsg", "");
+  }
+  function wireChannel(ch) {
+    dc = ch;
+    dc.binaryType = "arraybuffer";
+    dc.bufferedAmountLowThreshold = 1 << 20;
+    dc.onopen = function () { setConnected(true); };
+    dc.onclose = function () { setConnected(false, "Disconnected"); };
+    dc.onmessage = onMessage;
+  }
+
+  $("t-a").onclick = function () { tab("a"); };
+  $("t-b").onclick = function () { tab("b"); };
+  function tab(w) {
+    $("t-a").setAttribute("aria-selected", w === "a"); $("t-b").setAttribute("aria-selected", w === "b");
+    $("pane-a").style.display = w === "a" ? "flex" : "none"; $("pane-b").style.display = w === "b" ? "flex" : "none";
+  }
+
+  $("mk").onclick = async function () {
+    try {
+      msg("cmsg", "Creating code…");
+      newPC(); wireChannel(pc.createDataChannel("text"));
+      await pc.setLocalDescription(await pc.createOffer());
+      await waitIce();
+      $("offer").value = await encode(pc.localDescription);
+      msg("cmsg", "Copy this code to device B.", "ok");
+    } catch (e) { msg("cmsg", "Could not create a code: " + e.message, "err"); }
+  };
+  $("fin").onclick = async function () {
+    try {
+      if (!pc || !pc.localDescription) { msg("cmsg", "Create a code first.", "err"); return; }
+      var ans = await decode($("reply").value);
+      msg("cmsg", "Connecting…");
+      await pc.setRemoteDescription(ans);
+    } catch (e) { msg("cmsg", "That reply code is not valid.", "err"); }
+  };
+  $("join").onclick = async function () {
+    try {
+      var off = await decode($("join-in").value);
+      msg("cmsg", "Creating reply…");
+      newPC(); pc.ondatachannel = function (ev) { wireChannel(ev.channel); };
+      await pc.setRemoteDescription(off);
+      await pc.setLocalDescription(await pc.createAnswer());
+      await waitIce();
+      $("answer").value = await encode(pc.localDescription);
+      msg("cmsg", "Copy this reply to device A. This page connects on its own.", "ok");
+    } catch (e) { msg("cmsg", "That code is not valid.", "err"); }
+  };
+  $("reset").onclick = function () {
+    try { if (dc) dc.close(); if (pc) pc.close(); } catch (e) {}
+    $("offer").value = ""; $("reply").value = ""; $("join-in").value = ""; $("answer").value = "";
+    setConnected(false);
+  };
+
+  function copyText(text, id) {
+    function fallback(el) { if (el) { el.focus(); el.select(); } msg(id, "Selected. Press copy on your keyboard.", "ok"); }
+    return function (el) {
+      try { navigator.clipboard.writeText(text).then(function () { msg(id, "Copied.", "ok"); }, function () { fallback(el); }); }
+      catch (e) { fallback(el); }
+    };
+  }
+  $("cp-offer").onclick = function () { copyText($("offer").value, "cmsg")($("offer")); };
+  $("cp-answer").onclick = function () { copyText($("answer").value, "cmsg")($("answer")); };
+
+  // ---- text transfer ----
+  function split(text) {
+    var out = [], i = 0;
+    while (i < text.length) {
+      var end = Math.min(i + CHUNK, text.length);
+      if (end < text.length) { var c = text.charCodeAt(end - 1); if (c >= 0xD800 && c <= 0xDBFF) end--; }
+      out.push(text.slice(i, end)); i = end;
+    }
+    return out;
+  }
+  function drain() {
+    return new Promise(function (res) {
+      if (dc.bufferedAmount < (4 << 20)) return res();
+      dc.onbufferedamountlow = function () { dc.onbufferedamountlow = null; res(); };
+    });
+  }
+  $("count").textContent = "0 characters";
+  $("src").oninput = function () { $("count").textContent = fmt($("src").value.length) + " characters"; };
+  $("load").onclick = function () { $("file").click(); };
+  $("file").onchange = function () {
+    var f = $("file").files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () { $("src").value = String(r.result || ""); $("src").oninput(); msg("smsg", "Loaded " + f.name + ".", "ok"); };
+    r.readAsText(f); $("file").value = "";
+  };
+  $("send").onclick = async function () {
+    var text = $("src").value;
+    if (!dc || dc.readyState !== "open") { msg("smsg", "Not connected.", "err"); return; }
+    if (!text) { msg("smsg", "Paste or load some text first.", "err"); return; }
+    var parts = split(text), bar = $("sbar"), fill = bar.firstElementChild;
+    $("send").disabled = true; bar.hidden = false; fill.style.width = "0%"; msg("smsg", "Sending…");
+    try {
+      dc.send(JSON.stringify({ t: "start", n: parts.length, chars: text.length }));
+      for (var i = 0; i < parts.length; i++) {
+        await drain();
+        dc.send(JSON.stringify({ t: "c", d: parts[i] }));
+        if (i % 5 === 0 || i === parts.length - 1) fill.style.width = Math.round(((i + 1) / parts.length) * 100) + "%";
+      }
+      dc.send(JSON.stringify({ t: "end" }));
+      msg("smsg", "Sent " + fmt(text.length) + " characters.", "ok");
+    } catch (e) { msg("smsg", "Sending failed. Check the connection and try again.", "err"); }
+    $("send").disabled = false; setTimeout(function () { bar.hidden = true; }, 600);
+  };
+  function onMessage(ev) {
+    var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+    var bar = $("rbar"), fill = bar.firstElementChild;
+    if (m.t === "start") { incoming = { n: m.n, chars: m.chars, got: 0, parts: [] }; bar.hidden = false; fill.style.width = "0%"; msg("rmsg", "Receiving…"); }
+    else if (m.t === "c" && incoming) {
+      incoming.parts.push(m.d); incoming.got++;
+      if (incoming.got % 5 === 0) fill.style.width = Math.round((incoming.got / incoming.n) * 100) + "%";
+    } else if (m.t === "end" && incoming) {
+      var text = incoming.parts.join("");
+      $("out").value = text; $("rcount").textContent = fmt(text.length) + " characters";
+      msg("rmsg", "Received " + fmt(text.length) + " characters.", "ok");
+      fill.style.width = "100%"; setTimeout(function () { bar.hidden = true; }, 600); incoming = null;
+    }
+  }
+  $("copy").onclick = function () { copyText($("out").value, "rmsg")($("out")); };
+  $("save").onclick = function () {
+    var t = $("out").value; if (!t) { msg("rmsg", "Nothing to save yet.", "err"); return; }
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([t], { type: "text/plain;charset=utf-8" }));
+    a.download = "relay.txt"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  };
+
+  if (!window.RTCPeerConnection) { msg("cmsg", "This browser does not support direct connections.", "err"); $("mk").disabled = true; $("join").disabled = true; }
+})();
+</script>
+</body>
+</html>
